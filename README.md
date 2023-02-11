@@ -27,6 +27,16 @@ This implementation of the GNFS algorithm uses the elliptic curve method for ste
 - numpy
 - scipy
 
+## Optimizations
+
+The following optimizations have been applied to the GNFS algorithm:
+
+- Parallelization of the sieve step to speed up the search for a smooth relation.
+- Use of an optimized sieve algorithm to improve the efficiency of the sieve step.
+- Better selection of parameters to improve the efficiency of the algorithm.
+- Use of fast linear algebra algorithms to improve the efficiency of the combination of relations step.
+
+
 ## Function Descriptions
 
 ### gnfs(n)
@@ -52,6 +62,20 @@ This function implements an optimized version of the sieve algorithm.
 
 ### select_best_relation(relations)
 This function selects the best relation based on parameters.
+
+## Limitations
+
+The GNFS algorithm is one of the fastest known algorithms for integer factorization, but it is still limited by the size of the numbers being factored. For extremely large numbers, the GNFS algorithm may take a very long time to complete, or it may not be able to factor the number at all.
+
+Additionally, the implementation of the GNFS algorithm in this code is not optimized for the most efficient performance. There are many possible optimizations that could be applied to further improve the efficiency of the algorithm.
+
+## Possible Optimizations
+
+1. Improved Sieve Algorithm: The current sieve algorithm is based on the standard sieve of Eratosthenes. However, there are several optimized sieve algorithms that could be used instead, such as the Sundaram sieve, the Legendre sieve, or the number field sieve. These algorithms can often be faster than the standard sieve and could be used to improve the efficiency of the factorization.
+2. Improved Elliptic Curve Method: The current implementation of the elliptic curve method uses a random starting point, which may not always result in the fastest factorization. Other methods, such as the Pollard-rho algorithm or the Brent-Montgomery algorithm, could be used instead to improve the efficiency of the factorization.
+3. Optimized Linear Algebra: The current implementation of the linear algebra step uses LU factorization, which is a standard method for solving linear systems. However, there are several other algorithms, such as the QR factorization or the Cholesky factorization, that could be used instead to improve the efficiency of the factorization.
+4. Parallelization: The current implementation of the algorithm uses parallelization to speed up the search for smooth relations. However, there are several other methods, such as GPU acceleration or distributed computing, that could be used to further improve the efficiency of the factorization.
+5. Improved Polynomial Selection: The current implementation of the auxiliary polynomial is x^2 - n, which is a simple polynomial that is easy to work with. However, there are other polynomials, such as x^2 + 1 or x^2 + x + 1, that could be used instead to improve the efficiency of the factorization.
 
 ## Conclusion
 
