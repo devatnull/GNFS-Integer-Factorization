@@ -200,7 +200,7 @@ For empirical reference, factoring 100-digit numbers typically requires 4-8 GB R
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/GNFS-Integer-Factorization.git
+git clone https://github.com/devatnull/High-Performance-Integer-Factorization-Suite-GNFS-MPQS-QS.git
 cd GNFS-Integer-Factorization
 
 # Install dependencies
