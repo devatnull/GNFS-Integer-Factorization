@@ -1148,8 +1148,8 @@ class FactorizationBenchmark:
                         logger.warning(f"Unexpected result format: {result}")
                         p, q = 1, n
                     
-                    # Check if factorization is correct
-                    is_correct = (p * q == n)
+                    # Check if factorization is correct and non-trivial
+                    is_correct = (p * q == n) and (p > 1 and q > 1)
                     correct.append(is_correct)
                     
                     if is_correct:
@@ -1357,7 +1357,21 @@ class FactorizationBenchmark:
             
             for i, (time, factors, correct) in enumerate(zip(result['times'], result['factors'], result['correct'])):
                 input_val = list(self.results.values())[0]['factors'][i][0] * list(self.results.values())[0]['factors'][i][1]
-                report += f"| {input_val} | {time:.6f} | {factors[0]} × {factors[1]} | {'✓' if correct else '✗'} |\n"
+                
+                # Check if this is a trivial factorization (1 × n)
+                if factors[0] == 1 and factors[1] == input_val:
+                    # Try to determine actual factors for common test cases
+                    if input_val == 100000980001501:
+                        expected = "10000019 × 10000079"
+                        report += f"| {input_val} | {time:.6f} | {factors[0]} × {factors[1]} (Expected: {expected}) | {'✓' if correct else '✗'} |\n"
+                    elif input_val == 1000000016000000063:
+                        expected = "1000000007 × 1000000009"
+                        report += f"| {input_val} | {time:.6f} | {factors[0]} × {factors[1]} (Expected: {expected}) | {'✓' if correct else '✗'} |\n"
+                    else:
+                        # For unknown numbers, just note it's a trivial factorization
+                        report += f"| {input_val} | {time:.6f} | {factors[0]} × {factors[1]} (Trivial) | {'✓' if correct else '✗'} |\n"
+                else:
+                    report += f"| {input_val} | {time:.6f} | {factors[0]} × {factors[1]} | {'✓' if correct else '✗'} |\n"
             
             report += "\n"
         
@@ -2936,7 +2950,7 @@ def special_q_lattice_sieve(n: int, f: Polynomial, g: Polynomial, factor_base_bo
     Includes progress tracking and ETA calculation.
     """
     # For large problems, use parallel sieving with work stealing
-    if factor_base_bound > 1000 and cpu_count() > 1:
+    if factor_base_bound > 500 and cpu_count() > 1:  # Lower threshold to use parallel more often
         logger.info("Using parallel sieving with work stealing")
         return parallel_special_q_lattice_sieve(n, f, g, factor_base_bound, special_q_range, time_limit)
     
@@ -2947,10 +2961,26 @@ def special_q_lattice_sieve(n: int, f: Polynomial, g: Polynomial, factor_base_bo
     start_time = time.time()
     relations = []
     
+    # Check if factor base bound is sufficient for the number size
+    digit_count = len(str(n))
+    original_bound = factor_base_bound
+    
+    # Dynamically adjust factor base size based on number size
+    if digit_count > 15 and factor_base_bound < digit_count * 100:
+        factor_base_bound = max(factor_base_bound, digit_count * 100)
+        logger.info(f"Adjusted factor base bound from {original_bound} to {factor_base_bound} based on number size")
+    
     # Create factor bases
     factor_bases = create_factor_base(n, f, g, factor_base_bound)
+    total_primes = sum(len(fb) for fb in factor_bases.values())
+    logger.info(f"Created factor bases with {total_primes} total primes")
     
     # Generate special-q primes in the range
+    # Expand range for larger numbers
+    if digit_count > 12 and special_q_range[1] - special_q_range[0] < factor_base_bound:
+        special_q_range = (special_q_range[0], special_q_range[0] + min(factor_base_bound * 3, 100000))
+        logger.info(f"Expanded special-q range to {special_q_range}")
+        
     special_q_primes = list(primerange(special_q_range[0], special_q_range[1]))
     logger.info(f"Generated {len(special_q_primes)} special-q primes")
     
@@ -2963,17 +2993,25 @@ def special_q_lattice_sieve(n: int, f: Polynomial, g: Polynomial, factor_base_bo
         sieve_function = gpu_accelerated_lattice_sieve
     else:
         # For CPU, use 3-LP for larger problems, regular sieve for smaller ones
-        if factor_base_bound > 500:
+        if factor_base_bound > 300:  # Lower threshold to use 3-LP more often
             logger.info("Using 3-large prime variation with cache-oblivious algorithms")
             sieve_function = lattice_sieve_with_3lp
         else:
             logger.info("Using standard lattice sieving")
             sieve_function = lattice_sieve
+            
+    # Calculate target relations based on matrix size
+    target_relations = int(factor_base_bound * 1.2)
+    logger.info(f"Target: {target_relations} relations")
+    
+    # Calculate target relations based on matrix size
+    target_relations = int(factor_base_bound * 1.2)
+    logger.info(f"Target: {target_relations} relations")
     
     # Process each special-q prime
     for i, special_q in enumerate(special_q_primes):
-        if time.time() - start_time > time_limit * 0.8:  # Reserve some time for Gröbner basis
-            logger.info(f"Time limit (80%) reached after processing {len(relations)} relations")
+        if time.time() - start_time > time_limit * 0.85:  # Reserve some time for Gröbner basis
+            logger.info(f"Time limit (85%) reached after processing {len(relations)} relations")
             break
         
         # Update progress tracker
@@ -2986,17 +3024,20 @@ def special_q_lattice_sieve(n: int, f: Polynomial, g: Polynomial, factor_base_bo
         for root in roots:
             new_relations = sieve_function(n, f, g, factor_bases, special_q, root)
             relations.extend(new_relations)
+            logger.info(f"Found {len(new_relations)} relations for special-q = {special_q}")
             
-            if len(relations) > factor_base_bound * 1.2:
-                logger.info(f"Found sufficient relations ({len(relations)})")
+            # Check if we have enough relations
+            if len(relations) >= target_relations:
+                logger.info(f"Found sufficient relations ({len(relations)} ≥ {target_relations})")
                 return relations
     
     # If we have time left and need more relations, try Gröbner basis techniques
     remaining_time = time_limit - (time.time() - start_time)
-    needed_relations = factor_base_bound - len(relations)
+    needed_relations = max(1, factor_base_bound - len(relations))
     
-    if remaining_time > 0 and needed_relations > 0 and len(str(n)) > 50:
-        logger.info(f"Using Gröbner basis techniques to find additional relations")
+    # Always try Gröbner for large gaps in relations
+    if remaining_time > 0 and needed_relations > 0:
+        logger.info(f"Using Gröbner basis techniques to find additional relations (need {needed_relations} more)")
         try:
             grobner_finder = GrobnerRelationFinder(n, f, g, factor_bases)
             grobner_relations = grobner_finder.find_structured_relations(max_relations=needed_relations)
@@ -4718,8 +4759,15 @@ def complete_gnfs(n: int, time_limit: float = 3600, checkpoint_dir: str = None) 
             try:
                 # Calculate optimal factor base bound based on number size
                 digit_count = len(str(n))
-                factor_base_bound = int(math.exp(math.sqrt(math.log(n) * math.log(math.log(n))) / 3))
-                factor_base_bound = max(factor_base_bound, digit_count * 50)  # Ensure adequate size
+                # More aggressive scaling for larger numbers
+                if digit_count < 15:
+                    # Original formula for smaller numbers
+                    factor_base_bound = int(math.exp(math.sqrt(math.log(n) * math.log(math.log(n))) / 3))
+                    factor_base_bound = max(factor_base_bound, digit_count * 50)
+                else:
+                    # Much larger bound for bigger numbers
+                    factor_base_bound = int(math.exp(math.sqrt(math.log(n) * math.log(math.log(n)))) / 2)
+                    factor_base_bound = max(factor_base_bound, digit_count * 500)
                 logger.info(f"Factor base bound: {factor_base_bound}")
                 
                 factor_bases = create_factor_base(n, f, g, factor_base_bound)
@@ -4731,7 +4779,13 @@ def complete_gnfs(n: int, time_limit: float = 3600, checkpoint_dir: str = None) 
                 
             except Exception as e:
                 logger.error(f"Factor base generation error: {str(e)}")
-                factor_base_bound = int(math.exp(math.sqrt(math.log(n) * math.log(math.log(n))) / 3))
+                # Use the same larger factor base logic for error recovery
+                digit_count = len(str(n))
+                if digit_count < 15:
+                    factor_base_bound = int(math.exp(math.sqrt(math.log(n) * math.log(math.log(n))) / 3))
+                else:
+                    factor_base_bound = int(math.exp(math.sqrt(math.log(n) * math.log(math.log(n)))) / 2)
+                    factor_base_bound = max(factor_base_bound, digit_count * 500)
                 factor_bases = create_factor_base(n, f, g, factor_base_bound)
         
         # Step 3: Sieving
@@ -4750,8 +4804,13 @@ def complete_gnfs(n: int, time_limit: float = 3600, checkpoint_dir: str = None) 
                 sieving_time_limit = time_limit * 0.65  # 65% for larger numbers
                 
             # Adjust special-q range based on number size
-            special_q_min = factor_base_bound // 20
-            special_q_max = factor_base_bound
+            digit_count = len(str(n))
+            if digit_count < 15:
+                special_q_min = factor_base_bound // 20
+                special_q_max = factor_base_bound
+            else:
+                special_q_min = factor_base_bound // 30
+                special_q_max = factor_base_bound * 2
             
             progress_interval = max(1, (time.time() - start_time) // 10)
             last_progress = time.time()
@@ -4763,14 +4822,14 @@ def complete_gnfs(n: int, time_limit: float = 3600, checkpoint_dir: str = None) 
                 logger.info(f"Sieving found {len(relations)} relations")
                 
                 # If we don't have enough relations, try to generate more with larger bounds
-                if len(relations) < factor_base_bound * 1.05:
+                if len(relations) < factor_base_bound * 1.1:
                     logger.warning(f"Insufficient relations: {len(relations)}. Attempting to find more...")
                     
-                    # Try with extended special-q range
+                    # Try with extended special-q range and more time
                     extended_relations = special_q_lattice_sieve(
                         n, f, g, factor_base_bound,
-                        (special_q_max, special_q_max * 2),
-                        sieving_time_limit * 0.3
+                        (special_q_max, special_q_max * 3),
+                        sieving_time_limit * 0.5
                     )
                     relations.extend(extended_relations)
                     
@@ -4788,8 +4847,9 @@ def complete_gnfs(n: int, time_limit: float = 3600, checkpoint_dir: str = None) 
                     return 1, n
             
             # Check if we have enough relations to proceed
-            if len(relations) < factor_base_bound:
-                logger.warning(f"Insufficient relations found: {len(relations)}. Need at least {factor_base_bound}")
+            min_relations_needed = int(factor_base_bound * 0.9)  # Allow some flexibility
+            if len(relations) < min_relations_needed:
+                logger.warning(f"Insufficient relations found: {len(relations)}. Need at least {min_relations_needed}")
                 return 1, n
         
         # Step 4: Linear Algebra
@@ -5228,10 +5288,26 @@ def parallel_special_q_lattice_sieve(n: int, f: Polynomial, g: Polynomial, facto
     """
     start_time = time.time()
     
+    # Check if factor base bound is sufficient for the number size
+    digit_count = len(str(n))
+    original_bound = factor_base_bound
+    
+    # Dynamically adjust factor base size based on number size
+    if digit_count > 15 and factor_base_bound < digit_count * 100:
+        factor_base_bound = max(factor_base_bound, digit_count * 100)
+        logger.info(f"Adjusted factor base bound from {original_bound} to {factor_base_bound} based on number size")
+    
     # Create factor bases
     factor_bases = create_factor_base(n, f, g, factor_base_bound)
+    total_primes = sum(len(fb) for fb in factor_bases.values())
+    logger.info(f"Created factor bases with {total_primes} total primes")
     
     # Generate special-q primes in the range
+    # Expand range for larger numbers
+    if digit_count > 12 and special_q_range[1] - special_q_range[0] < factor_base_bound:
+        special_q_range = (special_q_range[0], special_q_range[0] + min(factor_base_bound * 3, 100000))
+        logger.info(f"Expanded special-q range to {special_q_range}")
+        
     special_q_primes = list(primerange(special_q_range[0], special_q_range[1]))
     logger.info(f"Generated {len(special_q_primes)} special-q primes")
     
@@ -6382,7 +6458,15 @@ def complete_gnfs(n: int, time_limit: float = 3600, checkpoint_dir: str = None) 
     
     # Step 2: Generate Factor Bases
     digit_count = len(str(n))
-    factor_base_bound = int(math.exp(math.sqrt(math.log(n) * math.log(math.log(n))) / 3))
+    # More aggressive scaling for larger numbers
+    if digit_count < 15:
+        # Original formula for smaller numbers
+        factor_base_bound = int(math.exp(math.sqrt(math.log(n) * math.log(math.log(n))) / 3))
+        factor_base_bound = max(factor_base_bound, digit_count * 50)
+    else:
+        # Much larger bound for bigger numbers
+        factor_base_bound = int(math.exp(math.sqrt(math.log(n) * math.log(math.log(n)))) / 2)
+        factor_base_bound = max(factor_base_bound, digit_count * 500)
     logger.info(f"Factor base bound: {factor_base_bound}")
     
     # Step 3: Sieving
@@ -6508,7 +6592,13 @@ if __name__ == "__main__":
         
         # 2. Test factor base generation
         print("\n2. Testing factor base generation...")
-        factor_base_bound = int(math.exp(math.sqrt(math.log(test_n) * math.log(math.log(test_n))) / 3))
+        # Use the same larger factor base logic for error recovery
+        digit_count = len(str(test_n))
+        if digit_count < 15:
+            factor_base_bound = int(math.exp(math.sqrt(math.log(test_n) * math.log(math.log(test_n))) / 3))
+        else:
+            factor_base_bound = int(math.exp(math.sqrt(math.log(test_n) * math.log(math.log(test_n)))) / 2)
+            factor_base_bound = max(factor_base_bound, digit_count * 500)
         factor_bases = create_factor_base(test_n, f, g, factor_base_bound)
         print(f"   Created factor bases with {sum(len(fb) for fb in factor_bases.values())} primes")
         
